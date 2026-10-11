@@ -16,4 +16,5 @@ python-multipart>=0.0.9
 # --- reading uploaded audio and video ---------------------------------
 # Bundles the FFmpeg libraries, so there is no separate ffmpeg to install.
 # faster-whisper already pulls this in; pinned here because we use it directly.
-av>=11.0
+# Capped: PyAV 16+ dropped the metadata_errors argument faster-whisper 1.2 passes.
+av>=11.0,<16

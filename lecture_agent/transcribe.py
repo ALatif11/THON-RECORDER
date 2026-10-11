@@ -225,7 +225,10 @@ def detect_device(device="auto"):
     older card that cannot do float16 falls back instead of failing at load.
     """
     if device == "auto":
-        device = "cuda" if cuda_device_count() > 0 else "cpu"
+        # A visible GPU is not enough: without cuBLAS/cuDNN the model loads
+        # fine and then dies on the first encode, past load_model's fallback.
+        usable = cuda_device_count() > 0 and all(check_cuda_libraries().values())
+        device = "cuda" if usable else "cpu"
 
     supported = supported_compute_types(device)
     preferences = (

@@ -240,6 +240,13 @@ class Recorder:
 
         try:
             while not self._stop.is_set() and time.time() < deadline:
+                # Loopback delivers nothing at all while the speakers are
+                # silent, so a blind read() would block Stop forever.
+                # ponytail: silent stretches are dropped from the file rather
+                # than padded, so transcript timestamps skip over them.
+                if stream.get_read_available() < CHUNK:
+                    time.sleep(0.01)
+                    continue
                 data = stream.read(CHUNK, exception_on_overflow=False)
                 wav.writeframes(data)
                 written += len(data)
