@@ -1,1 +1,0 @@
-A recording agent that records THON meetings and then automates creating and sending out announcements in their group chat.

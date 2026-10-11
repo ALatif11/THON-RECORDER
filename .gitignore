@@ -1,0 +1,24 @@
+# Secrets. Never commit these.
+groupme_bot_id.txt
+anthropic_api_key.txt
+anthropic_api_key
+.anthropic_api_key
+api_key.txt
+.env
+
+# Your meetings. Large, and yours.
+recordings/
+notes/
+
+# NVIDIA CUDA libraries. 1.7 GB of vendor binaries, installed locally.
+cuda_libs/
+
+# Half-finished uploads.
+.uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/

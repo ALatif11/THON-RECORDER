@@ -1,0 +1,5 @@
+# Optional. Gives you a real app window instead of a browser tab.
+# Install is best-effort: pywebview's Windows backend leans on pythonnet,
+# which is sometimes slow to publish wheels for a brand new Python. If this
+# fails, everything still works, it just opens in your browser.
+pywebview>=5.0

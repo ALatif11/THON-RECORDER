@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>THON Announcer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%231e407c'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23f2b705'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <a class="brand" id="home-link" href="#">THON Announcer</a>
+  <nav>
+    <a href="#" id="history-link">History</a>
+    <a href="#" id="settings-link">Settings</a>
+  </nav>
+</header>
+
+<ol class="steps" id="steps">
+  <li data-step="1">Record</li>
+  <li data-step="2">Write</li>
+  <li data-step="3">Review</li>
+  <li data-step="4">Post</li>
+</ol>
+
+<main id="main"></main>
+
+<input type="file" id="file-input" hidden>
+
+<div class="modal" id="post-modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="post-title">
+    <h2 id="post-title">Post this to GroupMe?</h2>
+    <p class="sub" id="post-sub"></p>
+    <div id="post-preview"></div>
+    <div class="error" id="post-error" hidden></div>
+    <div class="modal-foot">
+      <button id="post-cancel">Cancel</button>
+      <button class="primary" id="post-confirm">Post now</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="settings-modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <h2 id="settings-title">Settings</h2>
+
+    <label class="field">
+      <span class="field-name">GroupMe bot ID</span>
+      <input type="text" id="bot-id" autocomplete="off" spellcheck="false">
+      <span class="hint" id="bot-id-status"></span>
+      <span class="hint">Make one at <a href="https://dev.groupme.com/bots" target="_blank" rel="noopener">dev.groupme.com/bots</a>:
+        click <b>Create Bot</b>, pick your group, give it a name, then copy the <b>Bot ID</b> here.</span>
+    </label>
+
+    <label class="field">
+      <span class="field-name">Past announcements</span>
+      <textarea id="examples" rows="9" placeholder="Paste 2 or 3 announcements you have sent before. New drafts will copy their style."></textarea>
+    </label>
+
+    <div class="error" id="settings-error" hidden></div>
+    <div class="modal-foot">
+      <button id="settings-cancel">Cancel</button>
+      <button class="primary" id="settings-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="drop-overlay">Drop the recording anywhere</div>
+<div class="toast" id="toast" role="status"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
