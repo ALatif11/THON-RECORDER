@@ -79,7 +79,15 @@ class SummarizationUnavailable(RuntimeError):
 
 
 def _ollama(prompt, as_json=False):
-    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": False}
+    # Ollama's default context is 2-4K tokens and it silently drops the start
+    # of a longer prompt, which is where the instructions are. A 17 minute
+    # chunk is ~3.5K tokens of transcript alone. 8K costs ~1 GB of RAM on a 3B model.
+    body = {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "options": {"num_ctx": 8192},
+    }
     if as_json:
         body["format"] = "json"
     req = urllib.request.Request(
