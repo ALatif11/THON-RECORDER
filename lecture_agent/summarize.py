@@ -57,6 +57,9 @@ Rules:
 - Keep every "[?]" flag so the president knows what to double-check.
 - Lead with what members need to DO, then dates, then updates.
 - Short, friendly, skimmable. Members read this on their phones.
+- Plain text only. GroupMe does not render markdown: no ** or #. Use "-" for lists.
+- Copy every date and time exactly as written in the notes. Never combine a weekday with a date the notes did not pair it with.
+- The announcement is for members. Never add questions or notes to the president inside it.
 - No em dashes.
 {style}{tone}
 Write only the announcement text, ready to post. Title: {title}
@@ -173,11 +176,24 @@ def write_announcement(notes, title="Meeting Recap", tone=""):
     prompt = REDUCE_PROMPT.format(
         style=_style(), tone=TONES.get(tone, ""), title=title, notes=json.dumps(notes, indent=2)
     )
-    return _ollama(prompt).strip()
+    return _strip_preamble(_ollama(prompt))
+
+
+def _strip_preamble(text):
+    """
+    Small models open with "Here is the announcement:" despite being told not
+    to, and pad lists with bare "- [?]" lines that flag nothing.
+    """
+    text = re.sub(r"\A\s*(here('s| is)|sure)[^\n]*:\s*\n", "", text, flags=re.IGNORECASE)
+    return re.sub(r"^[ \t]*[-*•]?[ \t]*\[\?\][ \t]*\n?", "", text, flags=re.MULTILINE).strip()
 
 
 if __name__ == "__main__":
     # Self-check of the parsing that small local models make necessary.
     assert _parse_json('```json\n{"a": 1}\n```') == {"a": 1}
     assert _parse_json('Sure! {"a": [1]} hope that helps') == {"a": [1]}
+    assert _strip_preamble("Here is the post-meeting announcement:\n\nHey team!") == "Hey team!"
+    assert _strip_preamble("Here's your announcement:\nHey") == "Hey"
+    assert _strip_preamble("Hey team! Here is the plan:\nCanning") == "Hey team! Here is the plan:\nCanning"
+    assert _strip_preamble("Updates:\n- Raised $4,200\n- [?]\n* [?]\n- Meet at HUB [?]") == "Updates:\n- Raised $4,200\n- Meet at HUB [?]"
     print("ok")
