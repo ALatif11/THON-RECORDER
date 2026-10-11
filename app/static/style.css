@@ -394,7 +394,9 @@ mark { background: var(--flag); color: inherit; border-radius: 2px; }
 .modal-card h2 { margin-top: 0; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 
-#post-preview { background: var(--panel-2); border-radius: 12px; padding: 14px; margin-top: 12px; }
+/* Long drafts scroll inside the preview so Cancel and Post stay on screen. */
+#post-modal .modal-card { display: flex; flex-direction: column; overflow: hidden; }
+#post-preview { background: var(--panel-2); border-radius: 12px; padding: 14px; margin-top: 12px; overflow-y: auto; min-height: 0; }
 #post-preview:empty { display: none; }
 .bubble {
   background: var(--panel);

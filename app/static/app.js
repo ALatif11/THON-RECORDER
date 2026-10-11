@@ -376,7 +376,7 @@ function renderDraft(main) {
     <section class="card">
       <div class="draft-head">
         <div>
-          <h1>${S.advanced ? esc(meta.title) : "Your announcement"}</h1>
+          <h1>${S.tab === "draft" ? "Your announcement" : "Meeting details"}</h1>
           <div class="sub">${esc(fmtWhen(meta.when))}</div>
         </div>
         <span class="save-state" id="save-state"></span>
@@ -531,7 +531,9 @@ async function openPost() {
       body: JSON.stringify({ markdown: $("draft").value }),
     });
     const n = res.messages.length;
+    const flags = ($("draft").value.match(/\[\?\]/g) || []).length;
     $("post-sub").innerHTML =
+      (flags ? `<b class="warn-text">${flags} [?] mark${flags === 1 ? " is" : "s are"} still in the text.</b> ` : "") +
       (n > 1 ? `GroupMe allows 1000 characters per message, so this will go out as <b>${n} messages</b>. ` : "This is exactly what your group will see. ") +
       (res.posted_at ? `<br><b class="warn-text">Heads up: this meeting was already posted ${esc(fmtWhen(res.posted_at))}.</b>` : "");
     $("post-preview").innerHTML = res.messages

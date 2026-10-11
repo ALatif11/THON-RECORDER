@@ -182,12 +182,12 @@ def post_draft(stem: str, body: DraftSave, dry_run: bool = False):
     from lecture_agent import groupme
 
     save_draft(stem, body)
+    if not body.markdown.strip():
+        raise HTTPException(400, "The announcement is empty.")
     try:
         if dry_run:
             groupme.require_bot_id()
             parts = groupme.split_message(body.markdown)
-            if not parts:
-                raise groupme.GroupMeError("The announcement is empty.")
         else:
             parts = groupme.post(body.markdown)
             library.mark_posted(stem)
