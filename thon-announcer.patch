@@ -1,0 +1,399 @@
+diff --git a/app/server.py b/app/server.py
+index 9c80fc7..9eb4e6e 100644
+--- a/app/server.py
++++ b/app/server.py
+@@ -105,7 +105,7 @@ def state():
+             "transcribe": transcribe.AVAILABLE,
+             "transcribe_error": transcribe.IMPORT_ERROR,
+             "summarize": summarize.AVAILABLE,
+-            "api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
++            "api_key": True,  # notes run on local Ollama, no key needed
+             "markdown": "raw-markdown" not in render_markdown("_x_"),
+         },
+         "recording": rec_status,
+@@ -156,6 +156,19 @@ def lecture(stem: str):
+     }
+ 
+ 
++class DraftSave(BaseModel):
++    markdown: str
++
++
++@app.put("/api/lectures/{stem}/notes")
++def save_draft(stem: str, body: DraftSave):
++    """The coordinator's edits to the announcement draft."""
++    stem = _safe_stem(stem)
++    library.notes_dir.mkdir(parents=True, exist_ok=True)
++    library.markdown_path(stem).write_text(body.markdown, encoding="utf-8")
++    return {"ok": True}
++
++
+ @app.get("/api/lectures/{stem}/transcript")
+ def transcript(stem: str):
+     stem = _safe_stem(stem)
+diff --git a/app/static/app.js b/app/static/app.js
+index 2af173c..7ea94bc 100644
+--- a/app/static/app.js
++++ b/app/static/app.js
+@@ -249,6 +249,7 @@ function renderContent() {
+     };
+   }
+   wireProcessButtons(wrap);
++  wireDraft(wrap);
+ 
+   if (S.jumpTo != null && S.tab === "transcript") {
+     const target = wrap.querySelector(`.seg[data-start="${S.jumpTo}"]`);
+@@ -263,7 +264,15 @@ function renderContent() {
+ }
+ 
+ function notesHtml(meta) {
+-  if (S.lecture.html) return `<div class="notes">${S.lecture.html}</div>`;
++  if (S.lecture.markdown != null)
++    return `<div class="review">
++      <p class="sub">Draft announcement. Nothing is posted until you approve it. Check anything marked [?].</p>
++      <textarea id="draft" rows="22" style="width:100%;font:inherit">${esc(S.lecture.markdown)}</textarea>
++      <p style="margin-top:10px">
++        <button id="draft-save">Save edits</button>
++        <button class="primary" id="draft-approve">Approve &amp; copy</button>
++      </p>
++    </div>`;
+ 
+   const why = meta.has_audio
+     ? `<p>This recording has not been processed yet.</p>
+@@ -497,6 +506,24 @@ function renderQueue(wrap) {
+   }
+ }
+ 
++function wireDraft(scope) {
++  const box = scope.querySelector("#draft");
++  if (!box) return;
++  const save = async () => {
++    await api(`/api/lectures/${encodeURIComponent(S.lecture.meta.stem)}/notes`, {
++      method: "PUT",
++      body: JSON.stringify({ markdown: box.value }),
++    });
++    S.lecture.markdown = box.value;
++  };
++  scope.querySelector("#draft-save").onclick = async () => { await save(); toast("Saved"); };
++  scope.querySelector("#draft-approve").onclick = async () => {
++    await save();
++    await navigator.clipboard.writeText(box.value);
++    toast("Approved and copied. Paste it into the group chat.");
++  };
++}
++
+ function wireProcessButtons(scope) {
+   for (const el of scope.querySelectorAll("[data-process]")) {
+     el.onclick = async () => {
+diff --git a/lecture_agent/summarize.py b/lecture_agent/summarize.py
+index 050b55c..eaa6aa7 100644
+--- a/lecture_agent/summarize.py
++++ b/lecture_agent/summarize.py
+@@ -1,147 +1,90 @@
+ """
+-Turns a transcript into a structured lecture overview.
++Turns a meeting transcript into a draft announcement, fully on-device.
+ 
+-Two passes:
++Two passes, both on a local Ollama model (nothing leaves the machine):
+   1. MAP    - extract a fixed schema from each ~15 min chunk
+-  2. REDUCE - merge chunks, dedupe concepts, write the final markdown
++  2. REDUCE - merge chunks and write the announcement draft
+ 
+-Requires: pip install anthropic
+-Set ANTHROPIC_API_KEY in your environment.
++Requires Ollama running locally:  ollama pull llama3.2:3b
++Override the model with OLLAMA_MODEL, the host with OLLAMA_HOST.
++Put 2-3 past announcements in announcement_examples.txt to match the org's voice.
+ """
+ 
+ import json
+ import os
+ import re
++import urllib.error
++import urllib.request
+ 
+-try:
+-    from anthropic import Anthropic
+-
+-    AVAILABLE = True
+-    IMPORT_ERROR = None
+-except ImportError as exc:  # pragma: no cover - optional dependency
+-    Anthropic = None
+-    AVAILABLE = False
+-    IMPORT_ERROR = str(exc)
+-
+-from .config import load_api_key
++from .config import project_root
+ from .transcribe import chunk, to_text
+ 
+-if AVAILABLE:
+-    from anthropic import AuthenticationError, PermissionDeniedError
++AVAILABLE = True  # stdlib only
++IMPORT_ERROR = None
++FATAL = ()
+ 
+-    FATAL = (AuthenticationError, PermissionDeniedError)
+-else:  # pragma: no cover
+-    FATAL = ()
+-
+-# Override with ANTHROPIC_MODEL if this ever goes stale.
+-MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
++MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
++HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+ 
+ SCHEMA = """{
+-  "concepts": [
+-    {"name": str, "definition": str, "why_it_matters": str, "timestamp": "MM:SS"}
+-  ],
+-  "questions": [
+-    {"asker": "student" | "instructor" | "unclear",
+-     "question": str,
+-     "answer": str,
+-     "answered": bool,
+-     "timestamp": "MM:SS"}
+-  ],
+-  "example_problems": [
+-    {"problem": str, "approach": str, "solution": str, "timestamp": "MM:SS"}
+-  ],
+-  "emphasized": [
+-    {"point": str, "signal": str, "timestamp": "MM:SS"}
+-  ],
+-  "logistics": [
+-    {"item": str, "date": str | null, "timestamp": "MM:SS"}
+-  ],
+-  "open_threads": [
+-    {"thread": str, "timestamp": "MM:SS"}
+-  ]
++  "updates": [{"point": str, "timestamp": "MM:SS"}],
++  "decisions": [{"decision": str, "timestamp": "MM:SS"}],
++  "action_items": [{"task": str, "owner": str | null, "due": str | null, "timestamp": "MM:SS"}],
++  "events": [{"name": str, "date": str | null, "time": str | null, "location": str | null, "timestamp": "MM:SS"}],
++  "asks": [{"ask": str, "timestamp": "MM:SS"}]
+ }"""
+ 
+-MAP_PROMPT = """You are extracting structured notes from one segment of a university lecture transcript. The transcript came from automatic speech recognition, so expect filler words, dropped words, and mangled technical terms.
++MAP_PROMPT = """You are extracting notes from one segment of a student organization meeting transcript (a Penn State THON organization). The transcript came from speech recognition, so expect filler and mangled names.
+ 
+ Rules:
+-- The instructor sometimes misspeaks and corrects themselves a few sentences later. Always record the corrected version, not the first attempt.
+-- ASR mangles notation and jargon. If something is clearly a garbled technical term, write your best reconstruction and append " [?]" to flag it.
+-- Do not promote a tangent or an aside into a concept. A concept is something the instructor actually taught and built on.
+-- Record only what is in the transcript. Never fill a category to make it look complete. Empty arrays are the correct answer when nothing fits.
+-- "emphasized" is for things the instructor explicitly flagged: "this will be on the exam", "this is the key idea", "people always get this wrong", repeated three times, etc. The "signal" field records what made you flag it.
+-- "logistics" is for exam dates, homework due dates, office hour changes, policy announcements.
+-- "open_threads" is for anything explicitly deferred: "we'll get to that next week", or a student question left unanswered.
+-
+-Timestamps are marked [MM:SS] in the transcript. Use the timestamp where each item begins.
++- Record only what was actually said. Empty arrays are correct when nothing fits.
++- If someone corrects themselves, keep the corrected version.
++- If a name, date, or place looks garbled, write your best guess and append " [?]".
++- "asks" is anything members are asked to do (sign up, donate, show up, fill out a form).
++- "action_items" are tasks assigned to a specific person or committee.
+ 
+-Respond with ONLY a JSON object matching this schema. No preamble, no markdown fences.
++Timestamps are marked [MM:SS]. Respond with ONLY a JSON object matching this schema:
+ 
+ {schema}
+ 
+ TRANSCRIPT SEGMENT:
+ {text}"""
+ 
+-REDUCE_PROMPT = """You are merging structured notes extracted from consecutive segments of one university lecture. The segments overlap, so the same item may appear more than once with slightly different wording.
+-
+-Your job:
+-- Merge duplicates. If the same concept appears in two segments, combine them into the single best entry and keep the EARLIEST timestamp.
+-- Preserve the lecture's actual order. Do not reorganize into a tidy structure the lecture did not have.
+-- Keep every "[?]" uncertainty flag from the input. Do not silently clean them up.
+-- Do not add anything that is not in the input notes.
+-
+-Then write a markdown overview using exactly this structure:
+-
+-# {title}
+-
+-## TL;DR
+-Three to five sentences covering what this lecture was actually about.
+-
+-## Key Concepts
+-For each: bold name, the definition, then a line on why it matters. Include the timestamp.
+-
+-## Flagged as Important
+-Anything the instructor emphasized, with the signal that made it stand out. If empty, write "Nothing explicitly flagged."
+-
+-## Example Problems
+-Problem, approach, solution. Keep the worked steps. If empty, omit this section.
+-
+-## Questions Asked
+-Group by student questions and instructor questions. Mark unanswered ones clearly.
+-
+-## Logistics
+-Dates and deadlines. If empty, omit this section.
+-
+-## Loose Ends
+-Deferred or unresolved items. If empty, omit this section.
+-
+-## Study Checklist
+-A short bulleted list of what to actually go review, ordered by what seems most likely to be tested.
++REDUCE_PROMPT = """You are writing the post-meeting announcement for a Penn State THON organization, from notes extracted from the meeting.
+ 
+-Write plainly. No em dashes. Do not pad.
+-
+-SEGMENT NOTES:
++Rules:
++- Merge duplicates. Do not add anything not in the notes.
++- Keep every "[?]" flag so the president knows what to double-check.
++- Lead with what members need to DO, then dates, then updates.
++- Short, friendly, skimmable. Members read this on their phones.
++- No em dashes.
++{style}
++Write only the announcement text, ready to post. Title: {title}
++
++MEETING NOTES:
+ {notes}"""
+ 
+ 
+ class SummarizationUnavailable(RuntimeError):
+-    """Raised when the anthropic SDK or API key is missing."""
++    """Raised when Ollama is not reachable."""
+ 
+ 
+-def _client():
+-    if not AVAILABLE:
+-        raise SummarizationUnavailable(
+-            "The anthropic package is not installed "
+-            f"({IMPORT_ERROR}). Install it with: pip install anthropic"
+-        )
+-
+-    key, _source = load_api_key()
+-    if not key:
++def _ollama(prompt, as_json=False):
++    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": False}
++    if as_json:
++        body["format"] = "json"
++    req = urllib.request.Request(
++        f"{HOST}/api/chat",
++        data=json.dumps(body).encode(),
++        headers={"Content-Type": "application/json"},
++    )
++    try:
++        with urllib.request.urlopen(req, timeout=600) as resp:
++            return json.loads(resp.read())["message"]["content"]
++    except urllib.error.URLError as exc:
+         raise SummarizationUnavailable(
+-            "No Anthropic API key found. Either set ANTHROPIC_API_KEY in your "
+-            "environment, or put the key in a file named anthropic_api_key.txt "
+-            "in the project folder."
+-        )
+-    return Anthropic(api_key=key)
++            f"Could not reach Ollama at {HOST}. Start it and run `ollama pull {MODEL}`. ({exc})"
++        ) from exc
+ 
+ 
+ def _parse_json(text):
+@@ -155,6 +98,13 @@ def _parse_json(text):
+         raise
+ 
+ 
++def _style():
++    path = project_root() / "announcement_examples.txt"
++    if not path.is_file():
++        return ""
++    return "\nMatch the tone and format of these past announcements:\n\n" + path.read_text(encoding="utf-8") + "\n"
++
++
+ def _reporter(progress):
+     def report(message, pct):
+         print(message)
+@@ -167,72 +117,41 @@ def _reporter(progress):
+     return report
+ 
+ 
+-def extract_chunk(client, segments):
++def extract_chunk(segments):
+     """MAP step: pull the schema out of one chunk."""
+-    prompt = MAP_PROMPT.format(schema=SCHEMA, text=to_text(segments))
+-    resp = client.messages.create(
+-        model=MODEL,
+-        max_tokens=4000,
+-        messages=[{"role": "user", "content": prompt}],
+-    )
+-    return _parse_json(resp.content[0].text)
++    return _parse_json(_ollama(MAP_PROMPT.format(schema=SCHEMA, text=to_text(segments)), as_json=True))
+ 
+ 
+-def summarize(segments, title="Lecture Overview", window_minutes=15, progress=None):
+-    """Run the full map-reduce. Returns (markdown, raw_notes)."""
++def summarize(segments, title="Meeting Recap", window_minutes=15, progress=None):
++    """Run the full map-reduce. Returns (announcement_markdown, raw_notes)."""
+     report = _reporter(progress)
+-    client = _client()
+     chunks = chunk(segments, window_minutes=window_minutes)
+-
+     if not chunks:
+         raise RuntimeError("Nothing to summarize: the transcript is empty.")
+ 
+-    report(f"Extracting from {len(chunks)} chunks...", 0)
+-    notes = []
+-    failures = []
++    report(f"Extracting from {len(chunks)} chunks on {MODEL}...", 0)
++    notes, failures = [], []
+     for i, c in enumerate(chunks, 1):
+         report(f"  chunk {i}/{len(chunks)}", round(i / (len(chunks) + 1) * 100, 1))
+         try:
+-            notes.append(extract_chunk(client, c))
+-        except FATAL as e:
+-            # An auth failure will not fix itself on chunk 2. Stop now rather
+-            # than firing one doomed request per chunk.
+-            raise SummarizationUnavailable(
+-                "Anthropic rejected the API key, so notes cannot be generated. "
+-                "The transcript was fine and is cached, so fixing the key and "
+-                "reprocessing will not re-run whisper.\n"
+-                "Run `python run.py doctor` to see which key is being used and "
+-                f"why it was rejected.\nOriginal error: {e}"
+-            ) from e
++            notes.append(extract_chunk(c))
++        except SummarizationUnavailable:
++            raise  # Ollama down won't fix itself on chunk 2
+         except Exception as e:
+             failures.append(f"chunk {i}: {e}")
+             report(f"    failed, skipping: {e}", None)
+ 
+     if not notes:
+-        raise RuntimeError(
+-            "Every chunk failed to extract. First error: "
+-            + (failures[0] if failures else "unknown")
+-        )
+-
+-    report("Merging...", 95)
+-    try:
+-        resp = client.messages.create(
+-            model=MODEL,
+-            max_tokens=8000,
+-            messages=[
+-                {
+-                    "role": "user",
+-                    "content": REDUCE_PROMPT.format(
+-                        title=title, notes=json.dumps(notes, indent=2)
+-                    ),
+-                }
+-            ],
+-        )
+-    except FATAL as e:
+-        raise SummarizationUnavailable(
+-            "Anthropic rejected the API key while merging the notes. "
+-            f"Run `python run.py doctor` to diagnose it. Original error: {e}"
+-        ) from e
++        raise RuntimeError("Every chunk failed to extract. First error: " + (failures[0] if failures else "unknown"))
+ 
++    report("Writing announcement...", 95)
++    draft = _ollama(REDUCE_PROMPT.format(style=_style(), title=title, notes=json.dumps(notes, indent=2)))
+     report("Done.", 100)
+-    return resp.content[0].text, notes
++    return draft, notes
++
++
++if __name__ == "__main__":
++    # Self-check of the parsing that small local models make necessary.
++    assert _parse_json('```json\n{"a": 1}\n```') == {"a": 1}
++    assert _parse_json('Sure! {"a": [1]} hope that helps') == {"a": [1]}
++    print("ok")
